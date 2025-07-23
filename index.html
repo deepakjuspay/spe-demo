@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SPC & Passkey Demo</title>
+    <link href="https://cdn.tailwindcss.com" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center h-screen">
+
+    <div class="w-full max-w-sm p-8 bg-white rounded-lg shadow-md">
+        <h1 class="text-2xl font-bold text-center text-gray-800 mb-2">Checkout</h1>
+        <p class="text-center text-gray-600 mb-8">First, register a passkey. Then, use it to pay.</p>
+
+        <!-- Action Buttons -->
+        <div class="space-y-4 mb-6">
+            <button id="register-button" class="w-full bg-green-600 text-white py-3 rounded-lg font-semibold hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50 transition duration-300">
+                1. Register Passkey
+            </button>
+            <button id="pay-button" class="w-full bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 transition duration-300">
+                2. Pay with SPC
+            </button>
+        </div>
+
+        <!-- Status Display -->
+        <div id="status" class="mt-6 text-center text-sm font-medium h-5"></div>
+    </div>
+
+    <script>
+        const statusDiv = document.getElementById('status');
+        // This would be dynamically generated and tracked on the server in a real app.
+        // For the demo, we'll store the created credential ID here.
+        let createdCredentialId = null;
+
+        // --- 1. Passkey Registration ---
+        document.getElementById('register-button').addEventListener('click', async () => {
+            statusDiv.textContent = 'Starting passkey registration...';
+            statusDiv.className = 'mt-6 text-center text-sm font-medium text-gray-600';
+
+            try {
+                // These options would normally come from your server (the Relying Party)
+                const publicKeyCredentialCreationOptions = {
+                    // Challenge should be a random, server-generated value
+                    challenge: new TextEncoder().encode('random-challenge-' + Math.random()),
+                    rp: {
+                        name: "Demo Merchant",
+                        id: "your-app-id.firebaseapp.com", // IMPORTANT: Must match your domain
+                    },
+                    // User information
+                    user: {
+                        id: new TextEncoder().encode("user-id-" + Math.random()), // A unique user ID
+                        name: "demo@example.com",
+                        displayName: "Demo User",
+                    },
+                    pubKeyCredParams: [{ alg: -7, type: "public-key" }], // ES256 algorithm
+                    authenticatorSelection: {
+                        authenticatorAttachment: "platform", // Use device's built-in authenticator
+                        requireResidentKey: true, // Create a discoverable credential (passkey)
+                        userVerification: "required", // Require user verification (biometrics, PIN)
+                    },
+                    timeout: 60000,
+                    attestation: "none"
+                };
+
+                const newCredential = await navigator.credentials.create({
+                    publicKey: publicKeyCredentialCreationOptions
+                });
+
+                // In a real application, you would send `newCredential` to your server
+                // to be verified and stored.
+                console.log("Passkey created:", newCredential);
+                createdCredentialId = newCredential.rawId; // Store the ID for the payment step
+
+                statusDiv.textContent = 'Passkey registered successfully!';
+                statusDiv.classList.add('text-green-500');
+
+            } catch (error) {
+                console.error("Passkey registration failed:", error);
+                statusDiv.textContent = `Registration failed: ${error.message}`;
+                statusDiv.classList.add('text-red-500');
+            }
+        });
+
+
+        // --- 2. Secure Payment Confirmation ---
+        document.getElementById('pay-button').addEventListener('click', async () => {
+            statusDiv.textContent = 'Initiating payment...';
+            statusDiv.className = 'mt-6 text-center text-sm font-medium text-gray-600';
+
+
+            if (!window.PaymentRequest) {
+                statusDiv.textContent = 'Error: PaymentRequest API not supported.';
+                statusDiv.classList.add('text-red-500');
+                return;
+            }
+
+            // Define Payment Method Data
+            const paymentMethodData = [{
+                supportedMethods: "secure-payment-confirmation",
+                data: {
+                    challenge: new TextEncoder().encode('dummy-payment-challenge-12345'),
+                    // If a passkey was just created, we can suggest it.
+                    // In a real app, the server would provide a list of known credentials for the user.
+                    allowCredentials: createdCredentialId ? [{
+                        type: 'public-key',
+                        id: createdCredentialId
+                    }] : [],
+                    rpId: "your-app-id.firebaseapp.com", // IMPORTANT: Must match your domain
+                    timeout: 60000,
+                    payeeName: "Demo Merchant",
+                    payeeOrigin: "https://your-app-id.firebaseapp.com",
+                    instrument: {
+                        displayName: "Visa **** 1234",
+                        icon: "https://placehold.co/128x128/blue/white?text=Card"
+                    }
+                }
+            }];
+
+            // Define Payment Details
+            const paymentDetails = {
+                total: {
+                    label: "Total",
+                    amount: {
+                        currency: "USD",
+                        value: "1.00"
+                    }
+                }
+            };
+
+            try {
+                const request = new PaymentRequest(paymentMethodData, paymentDetails);
+                const canMakePayment = await request.canMakePayment();
+                if (!canMakePayment) {
+                    statusDiv.textContent = 'SPC not available or no passkey registered.';
+                    statusDiv.classList.add('text-red-500');
+                    return;
+                }
+
+                statusDiv.textContent = 'Awaiting user authentication...';
+                const response = await request.show();
+
+                statusDiv.textContent = 'Processing...';
+                console.log("Payment Response:", response.details);
+
+                // Simulate server verification
+                await new Promise(resolve => setTimeout(resolve, 1000)); 
+                
+                response.complete('success');
+                statusDiv.textContent = 'Payment successful!';
+                statusDiv.classList.remove('text-red-500');
+                statusDiv.classList.add('text-green-500');
+
+            } catch (error) {
+                console.error("Payment failed:", error);
+                statusDiv.textContent = `Payment failed: ${error.message}`;
+                statusDiv.classList.add('text-red-500');
+            }
+        });
+    </script>
+</body>
+</html>
