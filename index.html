@@ -14,7 +14,7 @@
         }
     </style>
 </head>
-<body class="bg-gray-100 flex items-center justify-center h-screen">
+<body class="bg-gray-100 flex items-center justify-center h-screen p-4">
 
     <div class="w-full max-w-sm p-8 bg-white rounded-lg shadow-md">
         <h1 class="text-2xl font-bold text-center text-gray-800 mb-2">Checkout</h1>
@@ -31,40 +31,63 @@
         </div>
 
         <!-- Status Display -->
-        <div id="status" class="mt-6 text-center text-sm font-medium h-5"></div>
+        <div id="status" class="mt-6 text-center text-sm font-medium h-10"></div>
+        <div id="error-details" class="mt-2 text-center text-xs text-red-600"></div>
     </div>
 
     <script>
         const statusDiv = document.getElementById('status');
-        // This would be dynamically generated and tracked on the server in a real app.
-        // For the demo, we'll store the created credential ID here.
+        const errorDetailsDiv = document.getElementById('error-details');
         let createdCredentialId = null;
+        
+        // --- FIXED: Relying Party ID now matches the website's domain ---
+        const relyingPartyId = "deepakjuspay.github.io";
 
+        function clearStatus() {
+            statusDiv.textContent = '';
+            errorDetailsDiv.textContent = '';
+            statusDiv.className = 'mt-6 text-center text-sm font-medium h-10';
+        }
+
+        function setStatus(message, isError = false, details = '') {
+            clearStatus();
+            statusDiv.textContent = message;
+            if (isError) {
+                statusDiv.classList.add('text-red-500');
+                errorDetailsDiv.textContent = details;
+                console.error(`Error: ${message}`, details);
+            } else {
+                statusDiv.classList.add('text-green-500');
+                console.log(`Success: ${message}`);
+            }
+        }
+        
         // --- 1. Passkey Registration ---
         document.getElementById('register-button').addEventListener('click', async () => {
+            clearStatus();
             statusDiv.textContent = 'Starting passkey registration...';
-            statusDiv.className = 'mt-6 text-center text-sm font-medium text-gray-600';
 
             try {
-                // These options would normally come from your server (the Relying Party)
                 const publicKeyCredentialCreationOptions = {
-                    // Challenge should be a random, server-generated value
                     challenge: new TextEncoder().encode('random-challenge-' + Math.random()),
                     rp: {
                         name: "Demo Merchant",
-                        id: "your-app-id.firebaseapp.com", // IMPORTANT: Must match your domain
+                        id: relyingPartyId, // Use the corrected RP ID
                     },
-                    // User information
                     user: {
-                        id: new TextEncoder().encode("user-id-" + Math.random()), // A unique user ID
+                        id: new TextEncoder().encode("user-id-" + Math.random()),
                         name: "demo@example.com",
                         displayName: "Demo User",
                     },
-                    pubKeyCredParams: [{ alg: -7, type: "public-key" }], // ES256 algorithm
+                    // --- FIXED: Added RS256 for better compatibility ---
+                    pubKeyCredParams: [
+                        { alg: -7, type: "public-key" },  // ES256
+                        { alg: -257, type: "public-key"} // RS256
+                    ],
                     authenticatorSelection: {
-                        authenticatorAttachment: "platform", // Use device's built-in authenticator
-                        requireResidentKey: true, // Create a discoverable credential (passkey)
-                        userVerification: "required", // Require user verification (biometrics, PIN)
+                        authenticatorAttachment: "platform",
+                        requireResidentKey: true,
+                        userVerification: "required",
                     },
                     timeout: 60000,
                     attestation: "none"
@@ -73,50 +96,43 @@
                 const newCredential = await navigator.credentials.create({
                     publicKey: publicKeyCredentialCreationOptions
                 });
+                
+                createdCredentialId = newCredential.rawId;
+                setStatus('Passkey registered successfully!');
 
-                // In a real application, you would send `newCredential` to your server
-                // to be verified and stored.
-                console.log("Passkey created:", newCredential);
-                createdCredentialId = newCredential.rawId; // Store the ID for the payment step
-
-                statusDiv.textContent = 'Passkey registered successfully!';
-                statusDiv.classList.add('text-green-500');
-
-            } catch (error) {
-                console.error("Passkey registration failed:", error);
-                statusDiv.textContent = `Registration failed: ${error.message}`;
-                statusDiv.classList.add('text-red-500');
+            } catch (err) {
+                let errorMsg = `Registration failed: ${err.name}`;
+                let errorDetails = err.message;
+                if (err.name === 'NotAllowedError') {
+                    errorDetails = 'Request cancelled. Ensure your device has a screen lock (PIN/fingerprint) enabled.';
+                } else if (err.name === 'SecurityError') {
+                     errorDetails = 'This might be due to an invalid Relying Party ID (rpId). Check the domain.';
+                }
+                setStatus(errorMsg, true, errorDetails);
             }
         });
 
 
         // --- 2. Secure Payment Confirmation ---
         document.getElementById('pay-button').addEventListener('click', async () => {
+            clearStatus();
             statusDiv.textContent = 'Initiating payment...';
-            statusDiv.className = 'mt-6 text-center text-sm font-medium text-gray-600';
-
 
             if (!window.PaymentRequest) {
-                statusDiv.textContent = 'Error: PaymentRequest API not supported.';
-                statusDiv.classList.add('text-red-500');
-                return;
+                return setStatus('PaymentRequest API not supported.', true, 'Your browser or WebView is too old.');
             }
 
-            // Define Payment Method Data
             const paymentMethodData = [{
                 supportedMethods: "secure-payment-confirmation",
                 data: {
                     challenge: new TextEncoder().encode('dummy-payment-challenge-12345'),
-                    // If a passkey was just created, we can suggest it.
-                    // In a real app, the server would provide a list of known credentials for the user.
                     allowCredentials: createdCredentialId ? [{
                         type: 'public-key',
                         id: createdCredentialId
                     }] : [],
-                    rpId: "your-app-id.firebaseapp.com", // IMPORTANT: Must match your domain
+                    rpId: relyingPartyId, // Use the corrected RP ID
                     timeout: 60000,
                     payeeName: "Demo Merchant",
-                    payeeOrigin: "https://your-app-id.firebaseapp.com",
                     instrument: {
                         displayName: "Visa **** 1234",
                         icon: "https://placehold.co/128x128/blue/white?text=Card"
@@ -124,44 +140,33 @@
                 }
             }];
 
-            // Define Payment Details
             const paymentDetails = {
-                total: {
-                    label: "Total",
-                    amount: {
-                        currency: "USD",
-                        value: "1.00"
-                    }
-                }
+                total: { label: "Total", amount: { currency: "USD", value: "1.00" } }
             };
 
             try {
                 const request = new PaymentRequest(paymentMethodData, paymentDetails);
                 const canMakePayment = await request.canMakePayment();
                 if (!canMakePayment) {
-                    statusDiv.textContent = 'SPC not available or no passkey registered.';
-                    statusDiv.classList.add('text-red-500');
-                    return;
+                    return setStatus('Cannot make payment.', true, 'SPC not available or no passkey is registered for this site.');
                 }
 
                 statusDiv.textContent = 'Awaiting user authentication...';
                 const response = await request.show();
-
+                
                 statusDiv.textContent = 'Processing...';
-                console.log("Payment Response:", response.details);
-
-                // Simulate server verification
                 await new Promise(resolve => setTimeout(resolve, 1000)); 
                 
                 response.complete('success');
-                statusDiv.textContent = 'Payment successful!';
-                statusDiv.classList.remove('text-red-500');
-                statusDiv.classList.add('text-green-500');
+                setStatus('Payment successful!');
 
-            } catch (error) {
-                console.error("Payment failed:", error);
-                statusDiv.textContent = `Payment failed: ${error.message}`;
-                statusDiv.classList.add('text-red-500');
+            } catch (err) {
+                 let errorMsg = `Payment failed: ${err.name}`;
+                 let errorDetails = err.message;
+                 if (err.name === 'NotAllowedError') {
+                    errorDetails = 'The payment was cancelled by the user.';
+                 }
+                 setStatus(errorMsg, true, errorDetails);
             }
         });
     </script>
