@@ -40,7 +40,6 @@
         const errorDetailsDiv = document.getElementById('error-details');
         let createdCredentialId = null;
         
-        // --- FIXED: Relying Party ID now matches the website's domain ---
         const relyingPartyId = "deepakjuspay.github.io";
 
         function clearStatus() {
@@ -72,17 +71,16 @@
                     challenge: new TextEncoder().encode('random-challenge-' + Math.random()),
                     rp: {
                         name: "Demo Merchant",
-                        id: relyingPartyId, // Use the corrected RP ID
+                        id: relyingPartyId,
                     },
                     user: {
                         id: new TextEncoder().encode("user-id-" + Math.random()),
                         name: "demo@example.com",
                         displayName: "Demo User",
                     },
-                    // --- FIXED: Added RS256 for better compatibility ---
                     pubKeyCredParams: [
-                        { alg: -7, type: "public-key" },  // ES256
-                        { alg: -257, type: "public-key"} // RS256
+                        { alg: -7, type: "public-key" },
+                        { alg: -257, type: "public-key"}
                     ],
                     authenticatorSelection: {
                         authenticatorAttachment: "platform",
@@ -107,6 +105,8 @@
                     errorDetails = 'Request cancelled. Ensure your device has a screen lock (PIN/fingerprint) enabled.';
                 } else if (err.name === 'SecurityError') {
                      errorDetails = 'This might be due to an invalid Relying Party ID (rpId). Check the domain.';
+                } else if (err.name === 'NotSupportedError') {
+                    errorDetails = 'Passkeys are not supported on this device. Check if Google Play Services are updated and you are signed in.';
                 }
                 setStatus(errorMsg, true, errorDetails);
             }
@@ -126,11 +126,12 @@
                 supportedMethods: "secure-payment-confirmation",
                 data: {
                     challenge: new TextEncoder().encode('dummy-payment-challenge-12345'),
-                    allowCredentials: createdCredentialId ? [{
+                    // --- FIXED: Changed 'allowCredentials' to 'credentialIds' ---
+                    credentialIds: createdCredentialId ? [{
                         type: 'public-key',
                         id: createdCredentialId
                     }] : [],
-                    rpId: relyingPartyId, // Use the corrected RP ID
+                    rpId: relyingPartyId,
                     timeout: 60000,
                     payeeName: "Demo Merchant",
                     instrument: {
